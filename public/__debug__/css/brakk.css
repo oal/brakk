@@ -1,0 +1,5 @@
+pre[class*="language-"] {
+	border-radius: 0 !important;
+	margin: 0 !important;
+	border: 0 !important;
+}
