@@ -1,18 +1,10 @@
 ﻿module brakk.middleware.base;
 
+import std.stdio;
 import brakk.http;
 
 class Middleware
 {
-	this(){}
-
-	void processRequest(HTTPServerRequest req)
-	{
-
-	}
-
-	void processResponse(HTTPServerResponse res)
-	{
-
-	}
+	void beforeView(HTTPServerRequest req, HTTPServerResponse res){};
+	void afterView(HTTPServerRequest req, HTTPServerResponse res){};
 }

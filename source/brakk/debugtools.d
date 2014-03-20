@@ -4,8 +4,9 @@ import std.stdio;
 import std.path;
 import std.string;
 import std.array;
-import vibe.d : HTTPRouter, serveStaticFiles;
+import vibe.d : serveStaticFiles;
 import brakk.settings;
+import brakk.router : Router;
 
 struct SourceLines
 {
@@ -43,8 +44,8 @@ SourceLines exceptionSource(Throwable exception, int lineOffset)
 	return sourceLines;
 }
 
-void serveDebugFiles(HTTPRouter router)
+void serveDebugFiles(Router router)
 {
 	auto publicPath = __FILE__.split(dirSeparator)[0..$-3].join(dirSeparator) ~ dirSeparator ~ "public";
-	debug router.get("/__debug__/*", serveStaticFiles(publicPath));
+	router.serveStatic("/__debug__/", publicPath);
 }
