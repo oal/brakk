@@ -6,7 +6,7 @@ import brakk.settings : appendSlash;
 
 class CommonMiddleware : Middleware
 {
-	void beforeView(HTTPServerRequest req, HTTPServerResponse res)
+	override void beforeView(HTTPServerRequest req, HTTPServerResponse res)
 	{
 		if(appendSlash && req.path[$-1] != '/') 
 		{

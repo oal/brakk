@@ -13,7 +13,7 @@ void errorPage(HTTPServerRequest req, HTTPServerResponse res, HTTPServerErrorInf
 	auto serverTime = Clock.currTime;
 
 	res.renderCompat!(
-		"error.dl",
+		"error.dt",
 		HTTPServerRequest, "req",
 		HTTPServerErrorInfo, "error",
 		SourceLines, "sourceLines",

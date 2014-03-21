@@ -10,6 +10,7 @@ import brakk.http;
 import brakk.middleware.base;
 import brakk.settings;
 import brakk.debugtools;
+import brakk.templates;
 
 class Project
 {
