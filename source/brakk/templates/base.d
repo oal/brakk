@@ -1,23 +1,30 @@
-﻿module brakk.templates;
+﻿module brakk.templates.base;
 
 import std.stdio;
 import std.string;
 import std.ascii;
+import std.array;
 import std.regex;
 import std.variant;
+import std.conv : to;
 import core.vararg;
+import brakk.templates.tags;
 
 static string source = `
 <body>
 	{# I am a comment #}
 	<p>{{ var }}</p>
-	<strong>{{ var2 }}</strong>
+	{% comment %}
+		<strong>{{ var2 }}</strong>
+	{% endcomment %}
 </body>
 `;
 
-Variant[string] context(T...)(T t)
+alias Context = Variant[string];
+
+Context context(T...)(T t)
 {
-	Variant[string] data;
+	Context data;
 	string lastString;
 	foreach(idx, arg; t)
 	{
@@ -47,11 +54,13 @@ struct Token
 {
 	TokenType type;
 	string value;
+	int line;
 }
 
 class Lexer
 {
 	string templateString;
+	int line = 0;
 
 	this(string templateString)
 	{
@@ -78,7 +87,11 @@ class Lexer
 				else if(curr == '{') currToken = TokenType.Var;
 				else continue;
 				
-				if(prevToken == TokenType.Text) tokens ~= Token(prevToken, templateString[start..i-1]);
+				if(prevToken == TokenType.Text)
+				{
+					tokens ~= Token(prevToken, templateString[start..i-1], line);
+					line += tokens[$-1].value.count("\n");
+				}
 				start = i+1;
 			}
 			else if(currToken && curr == '}')
@@ -86,7 +99,7 @@ class Lexer
 				if((prev == '%' && currToken == TokenType.Block) ||
 				   (prev == '#' && currToken == TokenType.Comment) ||
 				   (prev == '}' && currToken == TokenType.Var)) {
-					tokens ~= Token(currToken, templateString[start..i-1].strip());
+					tokens ~= Token(currToken, templateString[start..i-1].strip(), line);
 					currToken = TokenType.Text;
 					start = i+1;
 				}
@@ -99,15 +112,20 @@ class Lexer
 		// Add the rest of the templateString as text:
 		if(start != i)
 		{
-			tokens ~= Token(TokenType.Text, templateString[start..i-1]);
+			tokens ~= Token(TokenType.Text, templateString[start..i-1], line);
 		}
 		return tokens;
 	}
 }
 
-interface Node
+class Node
 {
-	string render(Variant[string]);
+	bool mustBeFirst;
+
+	string render(Context ctx)
+	{
+		return "";
+	}
 }
 
 class TextNode : Node
@@ -119,7 +137,7 @@ class TextNode : Node
 		this.content = content;
 	}
 
-	string render(Variant[string] ctx)
+	override string render(Context ctx)
 	{
 		return content;
 	}
@@ -134,7 +152,7 @@ class VarNode : Node
 		this.varName = varName;
 	}
 	
-	string render(Variant[string] ctx)
+	override string render(Context ctx)
 	{
 		return ctx[varName].toString();
 	}
@@ -149,12 +167,24 @@ class NodeList
 		nodes ~= node;
 	}
 
-	string render(Variant[string] context)
+	string render(Context context)
 	{
 		string result;
 		foreach(node; nodes) result ~= node.render(context);
 
 		return result;
+	}
+}
+
+class Tag {}
+
+Tag[string] tags;
+
+class TemplateSyntaxError : Exception
+{
+	this (string msg)
+	{
+		super(msg);
 	}
 }
 
@@ -167,11 +197,12 @@ class Parser
 		this.tokens = tokens;
 	}
 
-	NodeList parse()
+	NodeList parse(string parseUntil="")
 	{
 		auto nodes = new NodeList();
-		foreach(token; tokens)
+		while(tokens.length)
 		{
+			auto token = nextToken();
 			switch(token.type)
 			{
 				default: break;
@@ -180,9 +211,56 @@ class Parser
 					break;
 				case TokenType.Var:
 					nodes.add(new VarNode(token.value));
+					break;
+				case TokenType.Block:
+					string command;
+					try command = token.value.split(" ")[0];
+					catch (RangeError) emptyBlockTag(token);
+
+					if(parseUntil == "end"~command)
+					{
+						prependToken(token);
+						return nodes;
+					}
+
+					Tag blockCommand;
+					try blockCommand = tags[command];
+					catch (RangeError) invalidBlockTag(token, command, parseUntil);
+
+					//blockCommand(this, token);
+					break;
 			}
 		}
 		return nodes;
+	}
+
+	Token nextToken()
+	{
+		auto token = tokens[0];
+		tokens.popFront();
+		return token;
+	}
+
+	void prependToken(Token token)
+	{
+		tokens.insertInPlace(0, token);
+	}
+
+	void error(Token token, string msg)
+	{
+		throw new TemplateSyntaxError("Line " ~ to!string(token.line) ~": " ~ msg);
+	}
+
+	void emptyBlockTag(Token token)
+	{
+		error(token, "Empty block tag");
+	}
+
+	void invalidBlockTag(Token token, string command, string parseUntil)
+	{
+		auto msg="Invalid block tag: " ~ command;
+		if(parseUntil.length) msg ~= ", expected " ~ parseUntil;
+		error(token, msg);
 	}
 }
 

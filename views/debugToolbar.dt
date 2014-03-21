@@ -1,0 +1,5 @@
+#debugToolbar.container-fluid
+	p DEBUGBGUG
+
+link(rel='stylesheet', href='/__debug__/css/bootstrap.css', type='text/css')
+link(rel='stylesheet', href='/__debug__/css/brakk.css', type='text/css')
