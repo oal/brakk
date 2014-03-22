@@ -17,7 +17,14 @@ static string source = `
 	{% comment %}
 		<strong>{{ var2 }}</strong>
 	{% endcomment %}
+
+	{% verbatim %}
+		{{ var }}
+		{% comment %}Comment{% endcomment %}
+	{% endverbatim %}
+
 	<p>{{var2}}</p>
+	<pre>{% debug %}</pre>
 </body>
 `;
 
@@ -74,6 +81,7 @@ class Lexer
 		
 		TokenType currToken;
 		int start;
+		int startVerbatim = -1;
 		
 		auto i = 1;
 		char prev = templateString[0];
@@ -100,7 +108,27 @@ class Lexer
 				if((prev == '%' && currToken == TokenType.Block) ||
 				   (prev == '#' && currToken == TokenType.Comment) ||
 				   (prev == '}' && currToken == TokenType.Var)) {
-					tokens ~= Token(currToken, templateString[start..i-1].strip(), line);
+					auto value = templateString[start..i-1].strip();
+
+					// Everything between {% verbatim %} and {% endverbatim %} should be a Text token.
+					if(currToken == TokenType.Block && value == "verbatim")
+					{
+						startVerbatim = i+1;
+						start = startVerbatim;
+						currToken = TokenType.Text;
+						continue;
+					}
+					else if(currToken == TokenType.Block && value == "endverbatim")
+					{
+						currToken = TokenType.Text;
+						tokens ~= Token(currToken, templateString[startVerbatim..start-2], line);
+						startVerbatim = -1;
+						start = i+1;
+						continue;
+					}
+
+					// Any other token.
+					tokens ~= Token(currToken, value, line);
 					currToken = TokenType.Text;
 					start = i+1;
 				}
@@ -177,10 +205,6 @@ class NodeList
 	}
 }
 
-class Tag {}
-
-Tag[string] tags;
-
 class TemplateSyntaxError : Exception
 {
 	this (string msg)
@@ -227,8 +251,8 @@ class Parser
 					try 
 					{
 						auto blockCommand = templateTags[command];
-						blockCommand(this, token);
-						writeln("HH");
+						Node node = blockCommand(this, token);
+						nodes.add(node);
 					}
 					catch (RangeError) invalidBlockTag(token, command, parseUntil);
 					break;
@@ -286,10 +310,10 @@ class Parser
 shared static this()
 {
 	templateTags["comment"] = &comment;
+	templateTags["debug"] = &debugContext;
 
 	auto lexer = new Lexer(source);
 	auto tokens = lexer.tokenize();
-	writeln(tokens);
 
 	auto parser = new Parser(tokens);
 	auto nodes = parser.parse();
