@@ -17,6 +17,7 @@ static string source = `
 	{% comment %}
 		<strong>{{ var2 }}</strong>
 	{% endcomment %}
+	<p>{{var2}}</p>
 </body>
 `;
 
@@ -223,11 +224,13 @@ class Parser
 						return nodes;
 					}
 
-					Tag blockCommand;
-					try blockCommand = tags[command];
+					try 
+					{
+						auto blockCommand = templateTags[command];
+						blockCommand(this, token);
+						writeln("HH");
+					}
 					catch (RangeError) invalidBlockTag(token, command, parseUntil);
-
-					//blockCommand(this, token);
 					break;
 			}
 		}
@@ -239,6 +242,16 @@ class Parser
 		auto token = tokens[0];
 		tokens.popFront();
 		return token;
+	}
+
+	void skipPast(string endTag)
+	{
+		while(tokens.length)
+		{
+			auto token = nextToken();
+			if(token.type == TokenType.Block && token.value == endTag) return;
+		}
+		unclosedBlockTag(endTag);
 	}
 
 	void prependToken(Token token)
@@ -262,10 +275,18 @@ class Parser
 		if(parseUntil.length) msg ~= ", expected " ~ parseUntil;
 		error(token, msg);
 	}
+
+	void unclosedBlockTag(string tag)
+	{
+		throw new TemplateSyntaxError("Unclosed block tag: " ~ tag);
+	}
 }
+
 
 shared static this()
 {
+	templateTags["comment"] = &comment;
+
 	auto lexer = new Lexer(source);
 	auto tokens = lexer.tokenize();
 	writeln(tokens);
