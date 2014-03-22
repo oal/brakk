@@ -13,7 +13,7 @@ import brakk.templates.tags;
 static string source = `
 <body>
 	{# I am a comment #}
-	<p>{{ var }}</p>
+	<p>{{ var|myfilter:"arg":var:"arg3" }}</p>
 	{% comment %}
 		<strong>{{ var2 }}</strong>
 	{% endcomment %}
@@ -213,6 +213,26 @@ class TemplateSyntaxError : Exception
 	}
 }
 
+// Filters
+
+enum FilterArgTokenType
+{
+	Text,
+	Var
+}
+
+struct FilterArgToken
+{
+	FilterArgTokenType type;
+	string value;
+}
+
+struct FilterToken
+{
+	string name;
+	FilterArgToken[] arguments;
+}
+
 class Parser
 {
 	Token[] tokens;
@@ -235,6 +255,8 @@ class Parser
 					nodes.add(new TextNode(token.value));
 					break;
 				case TokenType.Var:
+					auto filters = parseFilters(token);
+					writeln(filters);
 					nodes.add(new VarNode(token.value));
 					break;
 				case TokenType.Block:
@@ -303,6 +325,54 @@ class Parser
 	void unclosedBlockTag(string tag)
 	{
 		throw new TemplateSyntaxError("Unclosed block tag: " ~ tag);
+	}
+
+	FilterToken[] parseFilters(Token token)
+	{
+		int start;
+		bool inFilter;
+		bool inArgument;
+		int i;
+
+		FilterToken[] filters;
+		FilterToken filter;
+		
+		auto len = token.value.length;
+		while(i < len)
+		{
+			auto c = token.value[i];
+			if(!inArgument && c == '|')
+			{
+				start = i+1;
+				inFilter = true;
+				filter = FilterToken();
+			}
+			else if(inFilter && (c == ':' || i == len - 1))
+			{
+				filter.name = token.value[start..i];
+				inFilter = false;
+				inArgument = true;
+				start = i+1;
+			}
+			else if(inArgument && (c == ':' || i == len - 1))
+			{
+				if(i == len - 1) i++;
+				auto argType = FilterArgTokenType.Var;
+				auto argValue = token.value[start..i];
+				if(argValue.front == '"' && argValue.back == '"')
+				{
+					argType = FilterArgTokenType.Text;
+					argValue = argValue[1..$-1];
+				}
+				
+				filter.arguments ~= FilterArgToken(argType, argValue);
+				start = i+1;
+			}
+			i++;
+		}
+		
+		filters ~= filter;
+		return filters;
 	}
 }
 
