@@ -18,6 +18,8 @@ static string source = `
 		<strong>{{ var2 }}</strong>
 	{% endcomment %}
 
+	{{ kv.key }}
+
 	{% verbatim %}
 		{{ var }}
 		{% comment %}Comment{% endcomment %}
@@ -174,16 +176,80 @@ class TextNode : Node
 
 class VarNode : Node
 {
-	string varName;
+	string tokenValue;
+	string[] keys;
+	FilterToken[] filters;
 	
-	this(string varName)
+	this(string tokenValue)
 	{
-		this.varName = varName;
+		this.tokenValue = tokenValue;
+		int firstFilterAt = to!int(tokenValue.indexOf('|'));
+
+		if(firstFilterAt == -1)
+		{
+			keys = tokenValue.split(".");
+		}
+		else
+		{
+			keys = tokenValue[0..firstFilterAt].split(".");
+			parseFilters(firstFilterAt);
+		}
 	}
 	
+	void parseFilters(int i)
+	{
+		int start;
+		bool inFilter;
+		bool inArgument;
+		
+		FilterToken filter;
+		
+		auto len = tokenValue.length;
+		while(i < len)
+		{
+			auto c = tokenValue[i];
+			if(!inArgument && c == '|')
+			{
+				start = i+1;
+				inFilter = true;
+				filter = FilterToken();
+			}
+			else if(inFilter && (c == ':' || i == len - 1))
+			{
+				filter.name = tokenValue[start..i];
+				inFilter = false;
+				inArgument = true;
+				start = i+1;
+			}
+			else if(inArgument && (c == ':' || i == len - 1))
+			{
+				if(i == len - 1) i++;
+				auto argType = FilterArgTokenType.Var;
+				auto argValue = tokenValue[start..i];
+				if(argValue.front == '"' && argValue.back == '"')
+				{
+					argType = FilterArgTokenType.Text;
+					argValue = argValue[1..$-1];
+				}
+				
+				filter.arguments ~= FilterArgToken(argType, argValue);
+				start = i+1;
+			}
+			i++;
+		}
+		
+		filters ~= filter;
+	}
+
 	override string render(Context ctx)
 	{
-		return ctx[varName].toString();
+		writeln(keys);
+		auto val = ctx[keys[0]];
+		if(keys.length > 1)
+		{
+			foreach(key; keys[1..$]) val = val[key];
+		}
+		return val.toString();
 	}
 }
 
@@ -231,6 +297,26 @@ struct FilterToken
 {
 	string name;
 	FilterArgToken[] arguments;
+
+	string[] resolve(Context ctx)
+	{
+		string[] args;
+		foreach(arg; arguments)
+		{
+			switch(arg.type)
+			{
+				default: continue;
+				case FilterArgTokenType.Text:
+					args ~= arg.value;
+					break;
+				case FilterArgTokenType.Var:
+					args ~= to!string(ctx[arg.value]);
+					break;
+			}
+		}
+
+		return args;
+	}
 }
 
 class Parser
@@ -255,8 +341,6 @@ class Parser
 					nodes.add(new TextNode(token.value));
 					break;
 				case TokenType.Var:
-					auto filters = parseFilters(token);
-					writeln(filters);
 					nodes.add(new VarNode(token.value));
 					break;
 				case TokenType.Block:
@@ -326,54 +410,6 @@ class Parser
 	{
 		throw new TemplateSyntaxError("Unclosed block tag: " ~ tag);
 	}
-
-	FilterToken[] parseFilters(Token token)
-	{
-		int start;
-		bool inFilter;
-		bool inArgument;
-		int i;
-
-		FilterToken[] filters;
-		FilterToken filter;
-		
-		auto len = token.value.length;
-		while(i < len)
-		{
-			auto c = token.value[i];
-			if(!inArgument && c == '|')
-			{
-				start = i+1;
-				inFilter = true;
-				filter = FilterToken();
-			}
-			else if(inFilter && (c == ':' || i == len - 1))
-			{
-				filter.name = token.value[start..i];
-				inFilter = false;
-				inArgument = true;
-				start = i+1;
-			}
-			else if(inArgument && (c == ':' || i == len - 1))
-			{
-				if(i == len - 1) i++;
-				auto argType = FilterArgTokenType.Var;
-				auto argValue = token.value[start..i];
-				if(argValue.front == '"' && argValue.back == '"')
-				{
-					argType = FilterArgTokenType.Text;
-					argValue = argValue[1..$-1];
-				}
-				
-				filter.arguments ~= FilterArgToken(argType, argValue);
-				start = i+1;
-			}
-			i++;
-		}
-		
-		filters ~= filter;
-		return filters;
-	}
 }
 
 
@@ -388,5 +424,12 @@ shared static this()
 	auto parser = new Parser(tokens);
 	auto nodes = parser.parse();
 
-	writeln(nodes.render(context("var", "Hei", "var2", "MMM")));
+	string[string] kv;
+	kv["key"] = "value";
+
+	writeln(nodes.render(context(
+		"var", "Hei",
+		"var2", "MMM",
+		"kv", kv
+	)));
 }
