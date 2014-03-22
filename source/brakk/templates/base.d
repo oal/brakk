@@ -3,22 +3,24 @@
 import std.stdio;
 import std.string;
 import std.ascii;
+import std.datetime : Clock;
 import std.array;
 import std.regex;
 import std.variant;
 import std.conv : to;
 import core.vararg;
 import brakk.templates.tags;
+import brakk.templates.filters;
 
-static string source = `
+enum source = `
 <body>
 	{# I am a comment #}
-	<p>{{ var|myfilter:"arg":var:"arg3" }}</p>
+	<p>{{ var }}</p>
 	{% comment %}
 		<strong>{{ var2 }}</strong>
 	{% endcomment %}
 
-	{{ kv.key }}
+	{{ kv.key|capfirst }}
 
 	{% verbatim %}
 		{{ var }}
@@ -216,7 +218,7 @@ class VarNode : Node
 			}
 			else if(inFilter && (c == ':' || i == len - 1))
 			{
-				filter.name = tokenValue[start..i];
+				filter.name = tokenValue[start..i+1];
 				inFilter = false;
 				inArgument = true;
 				start = i+1;
@@ -243,13 +245,19 @@ class VarNode : Node
 
 	override string render(Context ctx)
 	{
-		writeln(keys);
 		auto val = ctx[keys[0]];
 		if(keys.length > 1)
 		{
 			foreach(key; keys[1..$]) val = val[key];
 		}
-		return val.toString();
+		if(!filters.length) return val.toString();
+
+		string strVal = to!string(val);
+		foreach(filter; filters)
+		{
+			strVal = defaultFilters[filter.name](strVal, filter.resolve(ctx));
+		}
+		return strVal;
 	}
 }
 
@@ -412,24 +420,39 @@ class Parser
 	}
 }
 
+string render(string source, Context ctx)
+{
+	auto lexer = new Lexer(source);
+	auto tokens = lexer.tokenize();
+	
+	auto parser = new Parser(tokens);
+	auto nodes = parser.parse();
+	
+	return nodes.render(ctx);
+}
 
 shared static this()
 {
 	templateTags["comment"] = &comment;
 	templateTags["debug"] = &debugContext;
 
-	auto lexer = new Lexer(source);
-	auto tokens = lexer.tokenize();
-
-	auto parser = new Parser(tokens);
-	auto nodes = parser.parse();
+	defaultFilters["capfirst"] = &capfirst;
 
 	string[string] kv;
 	kv["key"] = "value";
 
-	writeln(nodes.render(context(
+	auto ctx = context(
 		"var", "Hei",
 		"var2", "MMM",
 		"kv", kv
-	)));
+	);
+
+	auto now = Clock.currTime;
+	foreach(i; 0..1000)
+	{
+		render(source, ctx);
+	}
+	writeln(Clock.currTime - now);
+
+	writeln(render(source, ctx));
 }
