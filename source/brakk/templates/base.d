@@ -420,15 +420,36 @@ class Parser
 	}
 }
 
-string render(string source, Context ctx)
+string render(string filename, ALIASES...)()
 {
+	enum source = import("../views/"~filename);
+
 	auto lexer = new Lexer(source);
 	auto tokens = lexer.tokenize();
 	
 	auto parser = new Parser(tokens);
 	auto nodes = parser.parse();
-	
-	return nodes.render(ctx);
+
+	static struct ctx
+	{
+		string name = "hoi";
+	}
+
+	mixin(localAliases!(0, ALIASES));
+	//context Context;
+	writeln(kv);
+	return "";
+	//return nodes.render(ctx);
+}
+
+template localAliases(int i, ALIASES...)
+{
+	static if( i < ALIASES.length ){
+		enum string localAliases = "alias ALIASES["~to!string(i)~"] "~__traits(identifier, ALIASES[i])~";\n"
+			~localAliases!(i+1, ALIASES);
+	} else {
+		enum string localAliases = "";
+	}
 }
 
 shared static this()
@@ -441,18 +462,18 @@ shared static this()
 	string[string] kv;
 	kv["key"] = "value";
 
-	auto ctx = context(
-		"var", "Hei",
-		"var2", "MMM",
-		"kv", kv
-	);
-
-	auto now = Clock.currTime;
+	/*auto now = Clock.currTime;
 	foreach(i; 0..1000)
 	{
 		render(source, ctx);
 	}
-	writeln(Clock.currTime - now);
+	writeln(Clock.currTime - now);*/
 
-	writeln(render(source, ctx));
+	/*struct context {
+		auto var = "Hei";
+		auto var2 = "MMM";
+		auto aaa = kv;
+	}*/
+
+	writeln(render!("base.html", kv));
 }

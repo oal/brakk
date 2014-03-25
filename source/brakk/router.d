@@ -14,12 +14,6 @@ class Router : URLRouter
 	private string[] staticDirectories;
 	private string[string] urls;
 
-	override URLRouter match(HTTPMethod method, string path, HTTPServerRequestDelegate cb)
-	{
-		writeln(method, path);
-		return super.match(method, path, cb);
-	}
-
 	override void handleRequest(HTTPServerRequest req, HTTPServerResponse res)
 	{
 		bool runMiddleware = true;
@@ -38,7 +32,6 @@ class Router : URLRouter
 		auto basePath = app.getPrefix();
 		foreach(view; app.getViews())
 		{
-			writeln(view.url);
 			urls[app.getName() ~ ":" ~ view.name] = view.url;
 			any(view.url, view);
 		}
