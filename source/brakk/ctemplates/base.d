@@ -193,6 +193,8 @@ class Parser
 	Token[] tokens;
 	string[] ttKeys;
 	tagFunc[] ttFuncs;
+	int tokenCounter;
+	bool eof;
 
 	this(Token[] tokens, string[] ttKeys, tagFunc[] ttFuncs)
 	{
@@ -205,7 +207,7 @@ class Parser
 	{
 		Node[] nodes;
 
-		while(tokens.length)
+		while(tokenCounter < tokens.length)
 		{
 			Token token = nextToken();
 			switch(token.type)
@@ -223,7 +225,7 @@ class Parser
 
 					if(parseUntil.countUntil(command) != -1)
 					{
-						prependToken(token);
+						back();
 						return nodes;
 					}
 
@@ -241,6 +243,17 @@ class Parser
 		return nodes;
 	}
 
+	Token nextToken()
+	{
+		tokenCounter++;
+		return tokens[tokenCounter-1];
+	}
+
+	void back()
+	{
+		tokenCounter--;
+	}
+
 	void skipPast(string endTag)
 	{
 		while(tokens.length)
@@ -249,18 +262,6 @@ class Parser
 			if(token.type == TokenType.block && token.value == endTag) return;
 		}
 		// Error
-	}
-
-	Token nextToken()
-	{
-		Token token = tokens[0];
-		tokens.popFront();
-		return token;
-	}
-
-	void prependToken(Token token)
-	{
-		tokens.insertInPlace(0, token);
 	}
 }
 
@@ -293,7 +294,7 @@ string parseTemplate(string text)
 	mixin(genTagsMap());
 
 	// Tmp:
-	output.put("//"~to!string(ttKeys)~"\n");
+	output.put("//" ~ to!string(ttKeys) ~ "\n");
 
 	auto parser = new Parser(tokens, ttKeys, ttFuncs);
 	auto nodes = parser.parse();
@@ -302,5 +303,6 @@ string parseTemplate(string text)
 	{
 		output.put(node.render());
 	}
+
 	return output.data;
 }
