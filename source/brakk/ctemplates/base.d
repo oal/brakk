@@ -152,49 +152,32 @@ class Parser
 			{
 				if(curr == '{')
 				{
-					switch(next)
-					{
-						case '{':
-							token.type = TokenType.variable;
-							start = lexerCounter+2;
-							break;
-						case '%':
-							token.type = TokenType.block;
-							start = lexerCounter+2;
-							break;
-						case '#':
-							token.type = TokenType.comment;
-							start = lexerCounter+2;
-							break;
-						default: break;
-					}
+					if(next == '{') token.type = TokenType.variable;
+					else if(next == '%') token.type = TokenType.block;
+					else if(next == '#') token.type = TokenType.comment;
 				}
 				if(token.type == TokenType.text) start = lexerCounter;
+				else start = lexerCounter + 2;
+
 				lexerCounter++;
 				continue;
 			}
 
 			// Insert token
-			if(token.type != TokenType.text && next == '}')
+			if((token.type != TokenType.text && next == '}')
+			   && ((curr == '}' && token.type == TokenType.variable)
+			   || (curr == '%' && token.type == TokenType.block)
+			   || (curr == '#' && token.type == TokenType.comment)))
 			{
-				switch(curr)
-				{
-					case '}', '%', '#':
-						token.value = text[start..lexerCounter].strip();
-						lexerCounter += 2;
-						goto Return;
-					default: break;
-				}
+				token.value = text[start..lexerCounter].strip();
+				lexerCounter += 2;
+				goto Return;
 			}
-			else if(token.type == TokenType.text && curr == '{')
+			else if(token.type == TokenType.text && curr == '{' &&
+			       (next == '{' || next == '%' || next == '#'))
 			{
-				switch(next)
-				{
-					case '{', '%', '#':
-						token.value = text[start..lexerCounter];
-						goto Return;
-					default: break;
-				}
+				token.value = text[start..lexerCounter];
+				goto Return;
 			}
 			lexerCounter++;
 		}
