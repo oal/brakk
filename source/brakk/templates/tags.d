@@ -1,9 +1,9 @@
-﻿module brakk.ctemplates.tags;
+﻿module brakk.templates.tags;
 
 import std.string : startsWith, strip;
 import std.conv : to;
 import std.algorithm : findSplitAfter;
-import brakk.ctemplates.base : Node, Parser, Token, render;
+import brakk.templates.base : Node, Parser, Token, render;
 
 class CommentNode : Node
 {

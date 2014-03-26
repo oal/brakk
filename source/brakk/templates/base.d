@@ -1,5 +1,5 @@
 ﻿// Attempt at compile time templates.
-module brakk.ctemplates.base;
+module brakk.templates.base;
 
 import std.stdio;
 import std.algorithm;
@@ -10,7 +10,7 @@ import std.functional;
 import std.conv : to;
 import core.vararg;
 import vibe.d : HTTPServerRequest, HTTPServerResponse;
-import ttags = brakk.ctemplates.tags;
+import ttags = brakk.templates.tags;
 
 template localAliases(int i, ALIASES...)
 {
@@ -190,6 +190,7 @@ class Parser
 			}
 			lexerCounter++;
 		}
+
 		token.value = text[start..lexerCounter+1];
 		eof = true;
 	Return:
