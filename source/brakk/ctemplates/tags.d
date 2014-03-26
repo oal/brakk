@@ -6,7 +6,7 @@ class CommentNode : Node
 {
 	override string render()
 	{
-		return "";
+		return "// Comment\n";
 	}
 }
 

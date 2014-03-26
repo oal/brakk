@@ -158,7 +158,7 @@ class Node
 
 	void writeText(string text)
 	{
-		output.put("buf.put(\""~text~"\");\n");
+		output.put("buf.put(\""~text.replace(`"`, `\"`)~"\");\n");
 	}
 
 	void writeCode(string code)
@@ -190,35 +190,117 @@ class VariableNode : Node
 
 class Parser
 {
-	Token[] tokens;
 	string[] ttKeys;
 	tagFunc[] ttFuncs;
+
+	// Lexer
+	string text;
+	int lexerCounter;
+	TokenType prevToken = TokenType.text;
+	Token[] tokens;
+
+	// Parser
 	int tokenCounter;
 	bool eof;
 
-	this(Token[] tokens, string[] ttKeys, tagFunc[] ttFuncs)
+	this(string text, string[] ttKeys, tagFunc[] ttFuncs)
 	{
-		this.tokens = tokens;
+		this.text = text;
 		this.ttKeys = ttKeys;
 		this.ttFuncs = ttFuncs;
 	}
 
+	Token nextToken()
+	{
+		Token token = parseNextToken();
+		tokens ~= token;
+		tokenCounter++;
+		return token;
+	}
+
+	// Lexer related
+	Token parseNextToken()
+	{
+		int start = -1;
+		Token token;
+
+		while(lexerCounter < text.length-1)
+		{
+			auto curr = text[lexerCounter];
+			auto next = text[lexerCounter+1];
+
+			// Token type
+			if(start == -1)
+			{
+				if(curr == '{')
+				{
+					switch(next)
+					{
+						case '{':
+							token.type = TokenType.variable;
+							start = lexerCounter+2;
+							break;
+						case '%':
+							token.type = TokenType.block;
+							start = lexerCounter+2;
+							break;
+						case '#':
+							token.type = TokenType.comment;
+							start = lexerCounter+2;
+							break;
+						default: break;
+					}
+				}
+				if(token.type == TokenType.text) start = lexerCounter;
+				lexerCounter++;
+				continue;
+			}
+
+			// Insert token
+			if(token.type != TokenType.text && next == '}')
+			{
+				switch(curr)
+				{
+					case '}', '%', '#':
+						token.value = text[start..lexerCounter].strip();
+						lexerCounter += 2;
+						goto Return;
+					default: break;
+				}
+			}
+			else if(token.type == TokenType.text && curr == '{')
+			{
+				switch(next)
+				{
+					case '{', '%', '#':
+						token.value = text[start..lexerCounter];
+						goto Return;
+					default: break;
+				}
+			}
+			lexerCounter++;
+		}
+		token.value = text[start..lexerCounter+1];
+		eof = true;
+	Return:
+		return token;
+	}
+
+	// Parser related
 	Node[] parse(string[] parseUntil=[])
 	{
 		Node[] nodes;
 
-		while(tokenCounter < tokens.length)
+		while(!eof)
 		{
 			Token token = nextToken();
 			switch(token.type)
 			{
 				case TokenType.text:
 					nodes ~= new TextNode(token.value);
-					//output.put("buf ~= \""~token.value~"\";\n");
 					break;
 				case TokenType.variable:
 					nodes ~= new VariableNode(token.value);
-					//output.put("buf ~= to!string("~token.value~");\n");
 					break;
 				case TokenType.block:
 					string command = token.value.split(" ")[0];
@@ -232,21 +314,11 @@ class Parser
 					auto dg = ttFuncs[ttKeys.countUntil(command)];
 					nodes ~= dg(this, token);
 
-					//if(command in templateTags) templateTags[command](this, token);
-
 					break;
-				default:
-					//output ~= `buf ~= "[[`~token.value~"]]\";\n";
-					break;
+				default: break;
 			}
 		}
 		return nodes;
-	}
-
-	Token nextToken()
-	{
-		tokenCounter++;
-		return tokens[tokenCounter-1];
 	}
 
 	void back()
@@ -269,9 +341,6 @@ alias Node function(Parser, Token) tagFunc;
 
 string parseTemplate(string text)
 {
-	auto lexer = new Lexer(text);
-	auto tokens = lexer.tokenize();
-
 	Appender!string output;
 
 	// Use two arrays instead of an associative array to get around CTFE limitation.
@@ -296,7 +365,7 @@ string parseTemplate(string text)
 	// Tmp:
 	output.put("//" ~ to!string(ttKeys) ~ "\n");
 
-	auto parser = new Parser(tokens, ttKeys, ttFuncs);
+	auto parser = new Parser(text, ttKeys, ttFuncs);
 	auto nodes = parser.parse();
 
 	foreach(node; nodes)
