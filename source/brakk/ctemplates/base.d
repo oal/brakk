@@ -106,6 +106,21 @@ class VariableNode : Node
 	}
 }
 
+class DummyNode : Node
+{
+	this(string text)
+	{
+		writeText("[[" ~ text ~ "]]");
+	}
+}
+
+string render(Node[] nodes)
+{
+	Appender!string output;
+	foreach(node; nodes) output.put(node.render());
+	return output.data;
+}
+
 class Parser
 {
 	string[] ttKeys;
@@ -130,6 +145,12 @@ class Parser
 
 	Token nextToken()
 	{
+		if(tokens.length > tokenCounter)
+		{
+			tokenCounter++;
+			return tokens[tokenCounter-1];
+		}
+
 		Token token = parseNextToken();
 		tokens ~= token;
 		tokenCounter++;
@@ -204,7 +225,7 @@ class Parser
 					nodes ~= new VariableNode(token.value);
 					break;
 				case TokenType.block:
-					string command = token.value.split(" ")[0];
+					string command = token.value.split(" ")[0].strip();
 
 					if(parseUntil.countUntil(command) != -1)
 					{
@@ -212,8 +233,16 @@ class Parser
 						return nodes;
 					}
 
-					auto dg = ttFuncs[ttKeys.countUntil(command)];
-					nodes ~= dg(this, token);
+					auto index = ttKeys.countUntil(command);
+					if(index != -1)
+					{
+						auto dg = ttFuncs[ttKeys.countUntil(command)];
+						nodes ~= dg(this, token);
+					}
+					else
+					{
+						nodes ~= new DummyNode(token.value);
+					}
 
 					break;
 				default: break;
@@ -269,10 +298,7 @@ string parseTemplate(string text)
 	auto parser = new Parser(text, ttKeys, ttFuncs);
 	auto nodes = parser.parse();
 
-	foreach(node; nodes)
-	{
-		output.put(node.render());
-	}
+	output.put(nodes.render());
 
 	return output.data;
 }
