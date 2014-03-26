@@ -1,41 +1,58 @@
-﻿module brakk.templates.tags;
+﻿module brakk.ctemplates.tags;
 
-import brakk.templates.base : Parser, Token, Node, Context;
-import std.stdio;
+import std.string : startsWith, strip;
 import std.conv : to;
+import std.algorithm : findSplitAfter;
+import brakk.ctemplates.base : Node, Parser, Token, render;
 
 class CommentNode : Node
 {
-	override string render(Context ctx)
+	override string render()
 	{
 		return "";
 	}
 }
 
-class DebugNode : Node
+class IfNode : Node
 {
-	override string render(Context ctx)
-	{
-		string text;
-		foreach(key, val; ctx)
-		{
-			text ~= to!string(key) ~ ": \t" ~ to!string(val) ~ "\n";
-		}
-		return text;
-	}
 }
 
-// Built in template tags (registered on the templateTags AA in base.d):
-
-Node function(Parser, Token)[string] templateTags;
-
-Node comment(Parser parser, Token token)
+Node commentTag(Parser parser, Token token)
 {
 	parser.skipPast("endcomment");
 	return new CommentNode();
 }
 
-Node debugContext(Parser parser, Token token)
+Node ifTag(Parser parser, Token token)
 {
-	return new DebugNode();
+	Node node = new IfNode();
+	
+	string condition = token.value.findSplitAfter(" ")[1];
+	node.writeCode("if(" ~ condition ~ "){");
+	
+	Node[] childNodes = parser.parse(["elif", "else", "endif"]);
+	node.writeCode(childNodes.render());
+	token = parser.nextToken();
+	
+	while(token.value.startsWith("elif"))
+	{
+		condition = token.value.findSplitAfter(" ")[1];
+		
+		childNodes = parser.parse(["elif", "else", "endif"]);
+		node.writeCode("} else if(" ~ condition ~ "){");
+		node.writeCode(childNodes.render());
+		token = parser.nextToken();
+	}
+	
+	if(token.value == "else")
+	{
+		childNodes = parser.parse(["endif"]);
+		node.writeCode("} else {");
+		node.writeCode(childNodes.render());
+		token = parser.nextToken();
+	}
+	
+	if(token.value == "endif") node.writeCode("}");
+	
+	return node;
 }

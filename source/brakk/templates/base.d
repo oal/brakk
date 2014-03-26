@@ -1,479 +1,288 @@
-﻿module brakk.templates.base;
+﻿// Attempt at compile time templates.
+module brakk.ctemplates.base;
 
 import std.stdio;
+import std.algorithm;
+import std.file;
 import std.string;
-import std.ascii;
-import std.datetime : Clock;
 import std.array;
-import std.regex;
-import std.variant;
+import std.functional;
 import std.conv : to;
 import core.vararg;
-import brakk.templates.tags;
-import brakk.templates.filters;
+import vibe.d : HTTPServerRequest, HTTPServerResponse;
+import ttags = brakk.ctemplates.tags;
 
-enum source = `
-<body>
-	{# I am a comment #}
-	<p>{{ var }}</p>
-	{% comment %}
-		<strong>{{ var2 }}</strong>
-	{% endcomment %}
-
-	{{ kv.key|capfirst }}
-
-	{% verbatim %}
-		{{ var }}
-		{% comment %}Comment{% endcomment %}
-	{% endverbatim %}
-
-	<p>{{var2}}</p>
-	<pre>{% debug %}</pre>
-</body>
-`;
-
-alias Context = Variant[string];
-
-Context context(T...)(T t)
+template localAliases(int i, ALIASES...)
 {
-	Context data;
-	string lastString;
-	foreach(idx, arg; t)
-	{
-		static if(idx % 2 == 0)
-		{
-			lastString = arg;
-		}
-		else
-		{
-			assert(lastString !is null);
-			data[lastString] = arg;
-			lastString = null;
-		}
-	}
-	return data;
+	static if( i < ALIASES.length )
+		enum string localAliases = "alias ALIASES[" ~ to!string(i) ~ "] " ~ __traits(identifier, ALIASES[i]) ~ ";\n" ~ localAliases!(i + 1, ALIASES);
+	else
+		enum string localAliases = "";
 }
+
+void renderTemplate(string templateFile, ALIASES...)(HTTPServerRequest req, HTTPServerResponse res)
+{
+	mixin(localAliases!(0, ALIASES));
+	Appender!string buf;
+	
+	pragma(msg, "Compiling template file " ~ templateFile);
+	enum emissionCode = parseTemplate(import(templateFile)); //, genFileTable!templateFile);
+	writeln(emissionCode);
+	/*
+	static struct tmplRoot
+	{
+		static void emptyBlock(ref Appender!string buf) { }
+		
+		mixin(emissionCode);
+	}
+	tmplRoot.tmplMain(buf);*/
+	
+	mixin(emissionCode);
+	res.writeBody(buf.data, "text/html; charset=UTF-8");
+}
+
 
 enum TokenType
 {
-	Text,
-	Var,
-	Block,
-	Comment
+	text,
+	variable,
+	block,
+	comment
 }
 
-struct Token
+static struct Token
 {
 	TokenType type;
 	string value;
-	int line;
-}
-
-class Lexer
-{
-	string templateString;
-	int line = 0;
-
-	this(string templateString)
-	{
-		this.templateString = templateString;
-	}
-
-	Token[] tokenize()
-	{
-		Token[] tokens;
-		
-		TokenType currToken;
-		int start;
-		int startVerbatim = -1;
-		
-		auto i = 1;
-		char prev = templateString[0];
-		while(i < templateString.length)
-		{
-			auto curr = templateString[i];
-			if(!currToken && prev == '{')
-			{
-				auto prevToken = currToken;
-				if(curr == '%') currToken = TokenType.Block;
-				else if(curr == '#') currToken = TokenType.Comment;
-				else if(curr == '{') currToken = TokenType.Var;
-				else continue;
-				
-				if(prevToken == TokenType.Text)
-				{
-					tokens ~= Token(prevToken, templateString[start..i-1], line);
-					line += tokens[$-1].value.count("\n");
-				}
-				start = i+1;
-			}
-			else if(currToken && curr == '}')
-			{
-				if((prev == '%' && currToken == TokenType.Block) ||
-				   (prev == '#' && currToken == TokenType.Comment) ||
-				   (prev == '}' && currToken == TokenType.Var)) {
-					auto value = templateString[start..i-1].strip();
-
-					// Everything between {% verbatim %} and {% endverbatim %} should be a Text token.
-					if(currToken == TokenType.Block && value == "verbatim")
-					{
-						startVerbatim = i+1;
-						start = startVerbatim;
-						currToken = TokenType.Text;
-						continue;
-					}
-					else if(currToken == TokenType.Block && value == "endverbatim")
-					{
-						currToken = TokenType.Text;
-						tokens ~= Token(currToken, templateString[startVerbatim..start-2], line);
-						startVerbatim = -1;
-						start = i+1;
-						continue;
-					}
-
-					// Any other token.
-					tokens ~= Token(currToken, value, line);
-					currToken = TokenType.Text;
-					start = i+1;
-				}
-			}
-			
-			prev = curr;
-			i++;
-		}
-		
-		// Add the rest of the templateString as text:
-		if(start != i)
-		{
-			tokens ~= Token(TokenType.Text, templateString[start..i-1], line);
-		}
-		return tokens;
-	}
 }
 
 class Node
 {
-	bool mustBeFirst;
-
-	string render(Context ctx)
+	Appender!string output;
+	
+	this(){}
+	
+	void writeText(string text)
 	{
-		return "";
+		output.put("buf.put(\""~text.replace(`\`, `\\`).replace(`"`, `\"`)~"\");\n");
+	}
+	
+	void writeCode(string code)
+	{
+		output.put(code~"\n");
+	}
+	
+	string render()
+	{
+		return output.data;
 	}
 }
 
 class TextNode : Node
 {
-	string content;
-
-	this(string content)
+	this(string text)
 	{
-		this.content = content;
-	}
-
-	override string render(Context ctx)
-	{
-		return content;
+		writeText(text);
 	}
 }
 
-class VarNode : Node
+class VariableNode : Node
 {
-	string tokenValue;
-	string[] keys;
-	FilterToken[] filters;
-	
-	this(string tokenValue)
+	this(string varValue)
 	{
-		this.tokenValue = tokenValue;
-		int firstFilterAt = to!int(tokenValue.indexOf('|'));
-
-		if(firstFilterAt == -1)
-		{
-			keys = tokenValue.split(".");
-		}
-		else
-		{
-			keys = tokenValue[0..firstFilterAt].split(".");
-			parseFilters(firstFilterAt);
-		}
-	}
-	
-	void parseFilters(int i)
-	{
-		int start;
-		bool inFilter;
-		bool inArgument;
-		
-		FilterToken filter;
-		
-		auto len = tokenValue.length;
-		while(i < len)
-		{
-			auto c = tokenValue[i];
-			if(!inArgument && c == '|')
-			{
-				start = i+1;
-				inFilter = true;
-				filter = FilterToken();
-			}
-			else if(inFilter && (c == ':' || i == len - 1))
-			{
-				filter.name = tokenValue[start..i+1];
-				inFilter = false;
-				inArgument = true;
-				start = i+1;
-			}
-			else if(inArgument && (c == ':' || i == len - 1))
-			{
-				if(i == len - 1) i++;
-				auto argType = FilterArgTokenType.Var;
-				auto argValue = tokenValue[start..i];
-				if(argValue.front == '"' && argValue.back == '"')
-				{
-					argType = FilterArgTokenType.Text;
-					argValue = argValue[1..$-1];
-				}
-				
-				filter.arguments ~= FilterArgToken(argType, argValue);
-				start = i+1;
-			}
-			i++;
-		}
-		
-		filters ~= filter;
-	}
-
-	override string render(Context ctx)
-	{
-		auto val = ctx[keys[0]];
-		if(keys.length > 1)
-		{
-			foreach(key; keys[1..$]) val = val[key];
-		}
-		if(!filters.length) return val.toString();
-
-		string strVal = to!string(val);
-		foreach(filter; filters)
-		{
-			strVal = defaultFilters[filter.name](strVal, filter.resolve(ctx));
-		}
-		return strVal;
+		writeCode("buf.put(to!string("~varValue~"));");
 	}
 }
 
-class NodeList
+class DummyNode : Node
 {
-	private Node[] nodes;
-
-	void add(Node node)
+	this(string text)
 	{
-		nodes ~= node;
-	}
-
-	string render(Context context)
-	{
-		string result;
-		foreach(node; nodes) result ~= node.render(context);
-
-		return result;
+		writeText("[[" ~ text ~ "]]");
 	}
 }
 
-class TemplateSyntaxError : Exception
+string render(Node[] nodes)
 {
-	this (string msg)
-	{
-		super(msg);
-	}
-}
-
-// Filters
-
-enum FilterArgTokenType
-{
-	Text,
-	Var
-}
-
-struct FilterArgToken
-{
-	FilterArgTokenType type;
-	string value;
-}
-
-struct FilterToken
-{
-	string name;
-	FilterArgToken[] arguments;
-
-	string[] resolve(Context ctx)
-	{
-		string[] args;
-		foreach(arg; arguments)
-		{
-			switch(arg.type)
-			{
-				default: continue;
-				case FilterArgTokenType.Text:
-					args ~= arg.value;
-					break;
-				case FilterArgTokenType.Var:
-					args ~= to!string(ctx[arg.value]);
-					break;
-			}
-		}
-
-		return args;
-	}
+	Appender!string output;
+	foreach(node; nodes) output.put(node.render());
+	return output.data;
 }
 
 class Parser
 {
+	string[] ttKeys;
+	tagFunc[] ttFuncs;
+	
+	// Lexer
+	string text;
+	int lexerCounter;
+	TokenType prevToken = TokenType.text;
 	Token[] tokens;
-
-	this(Token[] tokens)
+	
+	// Parser
+	int tokenCounter;
+	bool eof;
+	
+	this(string text, string[] ttKeys, tagFunc[] ttFuncs)
 	{
-		this.tokens = tokens;
+		this.text = text;
+		this.ttKeys = ttKeys;
+		this.ttFuncs = ttFuncs;
 	}
-
-	NodeList parse(string parseUntil="")
+	
+	Token nextToken()
 	{
-		auto nodes = new NodeList();
-		while(tokens.length)
+		if(tokens.length > tokenCounter)
 		{
-			auto token = nextToken();
+			tokenCounter++;
+			return tokens[tokenCounter-1];
+		}
+		
+		Token token = parseNextToken();
+		tokens ~= token;
+		tokenCounter++;
+		return token;
+	}
+	
+	// Lexer related
+	Token parseNextToken()
+	{
+		int start = -1;
+		Token token;
+		
+		while(lexerCounter < text.length-1)
+		{
+			auto curr = text[lexerCounter];
+			auto next = text[lexerCounter+1];
+			
+			// Token type
+			if(start == -1)
+			{
+				if(curr == '{')
+				{
+					if(next == '{') token.type = TokenType.variable;
+					else if(next == '%') token.type = TokenType.block;
+					else if(next == '#') token.type = TokenType.comment;
+				}
+				if(token.type == TokenType.text) start = lexerCounter;
+				else start = lexerCounter + 2;
+				
+				lexerCounter++;
+				continue;
+			}
+			
+			// Insert token
+			if((token.type != TokenType.text && next == '}')
+			   && ((curr == '}' && token.type == TokenType.variable)
+			    || (curr == '%' && token.type == TokenType.block)
+			    || (curr == '#' && token.type == TokenType.comment)))
+			{
+				token.value = text[start..lexerCounter].strip();
+				lexerCounter += 2;
+				goto Return;
+			}
+			else if(token.type == TokenType.text && curr == '{' &&
+			        (next == '{' || next == '%' || next == '#'))
+			{
+				token.value = text[start..lexerCounter];
+				goto Return;
+			}
+			lexerCounter++;
+		}
+		token.value = text[start..lexerCounter+1];
+		eof = true;
+	Return:
+		return token;
+	}
+	
+	// Parser related
+	Node[] parse(string[] parseUntil=[])
+	{
+		Node[] nodes;
+		
+		while(!eof)
+		{
+			Token token = nextToken();
 			switch(token.type)
 			{
-				default: break;
-				case TokenType.Text:
-					nodes.add(new TextNode(token.value));
+				case TokenType.text:
+					nodes ~= new TextNode(token.value);
 					break;
-				case TokenType.Var:
-					nodes.add(new VarNode(token.value));
+				case TokenType.variable:
+					nodes ~= new VariableNode(token.value);
 					break;
-				case TokenType.Block:
-					string command;
-					try command = token.value.split(" ")[0];
-					catch (RangeError) emptyBlockTag(token);
-
-					if(parseUntil == "end"~command)
+				case TokenType.block:
+					string command = token.value.split(" ")[0].strip();
+					
+					if(parseUntil.countUntil(command) != -1)
 					{
-						prependToken(token);
+						back();
 						return nodes;
 					}
-
-					try 
+					
+					auto index = ttKeys.countUntil(command);
+					if(index != -1)
 					{
-						auto blockCommand = templateTags[command];
-						Node node = blockCommand(this, token);
-						nodes.add(node);
+						auto dg = ttFuncs[ttKeys.countUntil(command)];
+						nodes ~= dg(this, token);
 					}
-					catch (RangeError) invalidBlockTag(token, command, parseUntil);
+					
 					break;
+				default: break;
 			}
 		}
 		return nodes;
 	}
-
-	Token nextToken()
+	
+	void back()
 	{
-		auto token = tokens[0];
-		tokens.popFront();
-		return token;
+		tokenCounter--;
 	}
-
+	
 	void skipPast(string endTag)
 	{
 		while(tokens.length)
 		{
-			auto token = nextToken();
-			if(token.type == TokenType.Block && token.value == endTag) return;
+			Token token = nextToken();
+			if(token.type == TokenType.block && token.value == endTag) return;
 		}
-		unclosedBlockTag(endTag);
-	}
-
-	void prependToken(Token token)
-	{
-		tokens.insertInPlace(0, token);
-	}
-
-	void error(Token token, string msg)
-	{
-		throw new TemplateSyntaxError("Line " ~ to!string(token.line) ~": " ~ msg);
-	}
-
-	void emptyBlockTag(Token token)
-	{
-		error(token, "Empty block tag");
-	}
-
-	void invalidBlockTag(Token token, string command, string parseUntil)
-	{
-		auto msg="Invalid block tag: " ~ command;
-		if(parseUntil.length) msg ~= ", expected " ~ parseUntil;
-		error(token, msg);
-	}
-
-	void unclosedBlockTag(string tag)
-	{
-		throw new TemplateSyntaxError("Unclosed block tag: " ~ tag);
+		// Error
 	}
 }
 
-string render(string filename, ALIASES...)()
-{
-	enum source = import("../views/"~filename);
+alias Node function(Parser, Token) tagFunc;
 
-	auto lexer = new Lexer(source);
-	auto tokens = lexer.tokenize();
+string parseTemplate(string text)
+{
+	Appender!string output;
 	
-	auto parser = new Parser(tokens);
+	// Use two arrays instead of an associative array to get around CTFE limitation.
+	string[] ttKeys;
+	tagFunc[] ttFuncs;
+	string genTagsMap()
+	{
+		string b;
+		foreach(mem; __traits(derivedMembers, ttags))
+		{
+			if(mem[$-3..$] == "Tag")
+			{
+				//output.put("// templateTags[\""~mem~"\"] = &ttags."~mem~";\n");
+				b ~= "ttKeys ~= \""~mem[0..$-3]~"\";\n";
+				b ~= "ttFuncs ~= &ttags."~mem~";\n";
+			}
+		}
+		return b;
+	}
+	mixin(genTagsMap());
+	
+	// Tmp:
+	output.put("//" ~ to!string(ttKeys) ~ "\n");
+	
+	auto parser = new Parser(text, ttKeys, ttFuncs);
 	auto nodes = parser.parse();
-
-	static struct ctx
-	{
-		string name = "hoi";
-	}
-
-	mixin(localAliases!(0, ALIASES));
-	//context Context;
-	writeln(kv);
-	return "";
-	//return nodes.render(ctx);
-}
-
-template localAliases(int i, ALIASES...)
-{
-	static if( i < ALIASES.length ){
-		enum string localAliases = "alias ALIASES["~to!string(i)~"] "~__traits(identifier, ALIASES[i])~";\n"
-			~localAliases!(i+1, ALIASES);
-	} else {
-		enum string localAliases = "";
-	}
-}
-
-shared static this()
-{
-	templateTags["comment"] = &comment;
-	templateTags["debug"] = &debugContext;
-
-	defaultFilters["capfirst"] = &capfirst;
-
-	string[string] kv;
-	kv["key"] = "value";
-
-	/*auto now = Clock.currTime;
-	foreach(i; 0..1000)
-	{
-		render(source, ctx);
-	}
-	writeln(Clock.currTime - now);*/
-
-	/*struct context {
-		auto var = "Hei";
-		auto var2 = "MMM";
-		auto aaa = kv;
-	}*/
-
-	writeln(render!("base.html", kv));
+	
+	output.put(nodes.render());
+	
+	return output.data;
 }
