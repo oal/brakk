@@ -13,10 +13,6 @@ class CommentNode : Node
 	}
 }
 
-class IfNode : Node
-{
-}
-
 Node commentTag(Parser parser, Token token)
 {
 	parser.skipPast("endcomment");
@@ -25,7 +21,7 @@ Node commentTag(Parser parser, Token token)
 
 Node ifTag(Parser parser, Token token)
 {
-	Node node = new IfNode();
+	Node node = new Node();
 	
 	string condition = token.value.findSplitAfter(" ")[1];
 	node.writeCode("if(" ~ condition ~ "){");
@@ -54,5 +50,22 @@ Node ifTag(Parser parser, Token token)
 	
 	if(token.value == "endif") node.writeCode("}");
 	
+	return node;
+}
+
+Node foreachTag(Parser parser, Token token)
+{
+	Node node = new Node();
+
+	string data = token.value.findSplitAfter(" ")[1];
+
+	node.writeCode("foreach(" ~ data ~ "){");
+	Node[] childNodes = parser.parse(["endforeach"]);
+
+	node.writeCode(childNodes.render());
+
+	token = parser.nextToken();
+	if(token.value == "endforeach") node.writeCode("}");
+
 	return node;
 }
