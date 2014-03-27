@@ -3,7 +3,8 @@
 import std.string : startsWith, strip;
 import std.conv : to;
 import std.algorithm : findSplitAfter;
-import brakk.templates.base : Node, Parser, Token, render;
+import brakk.templates.base : Node, Parser, Token, render, ErrorNode;
+import brakk.templates.helpers : illegalParens;
 
 class CommentNode : Node
 {
@@ -22,20 +23,17 @@ Node commentTag(Parser parser, Token token)
 Node ifTag(Parser parser, Token token)
 {
 	Node node = new Node();
-	
-	string condition = token.value.findSplitAfter(" ")[1];
-	node.writeCode("if(" ~ condition ~ "){");
+
+	node.writeCode("if(mixin(q{" ~ token.value[3..$] ~ "})){");
 	
 	Node[] childNodes = parser.parse(["elif", "else", "endif"]);
 	node.writeCode(childNodes.render());
 	token = parser.nextToken();
 	
 	while(token.value.startsWith("elif"))
-	{
-		condition = token.value.findSplitAfter(" ")[1];
-		
+	{		
 		childNodes = parser.parse(["elif", "else", "endif"]);
-		node.writeCode("} else if(" ~ condition ~ "){");
+		node.writeCode("} else if(mixin(q{" ~ token.value[5..$] ~ "})){");
 		node.writeCode(childNodes.render());
 		token = parser.nextToken();
 	}
@@ -57,7 +55,8 @@ Node foreachTag(Parser parser, Token token)
 {
 	Node node = new Node();
 
-	string data = token.value.findSplitAfter(" ")[1];
+	string data = token.value[8..$];
+	if(illegalParens(data)) return new ErrorNode("Illegal use of foreach");
 
 	node.writeCode("foreach(" ~ data ~ "){");
 	Node[] childNodes = parser.parse(["endforeach"]);

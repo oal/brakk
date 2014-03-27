@@ -10,6 +10,7 @@ import std.functional;
 import std.conv : to;
 import core.vararg;
 import vibe.d : HTTPServerRequest, HTTPServerResponse;
+import brakk.templates.helpers : illegalParens;
 import ttags = brakk.templates.tags;
 
 template localAliases(int i, ALIASES...)
@@ -38,6 +39,7 @@ void renderTemplate(string templateFile, ALIASES...)(HTTPServerRequest req, HTTP
 	tmplRoot.tmplMain(buf);*/
 	
 	mixin(emissionCode);
+
 	res.writeBody(buf.data, "text/html; charset=UTF-8");
 }
 
@@ -94,11 +96,11 @@ class VariableNode : Node
 	}
 }
 
-class DummyNode : Node
+class ErrorNode : Node
 {
 	this(string text)
 	{
-		writeText("[[" ~ text ~ "]]");
+		writeCode("writeln(`ERROR: " ~ text ~ "`);");
 	}
 }
 
@@ -268,7 +270,6 @@ string parseTemplate(string text)
 		{
 			if(mem[$-3..$] == "Tag")
 			{
-				//output.put("// templateTags[\""~mem~"\"] = &ttags."~mem~";\n");
 				b ~= "ttKeys ~= \""~mem[0..$-3]~"\";\n";
 				b ~= "ttFuncs ~= &ttags."~mem~";\n";
 			}
