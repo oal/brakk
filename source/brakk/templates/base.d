@@ -116,6 +116,7 @@ string render(Node[] nodes)
 
 class Parser
 {
+	string[string] dependencies;
 	string[] ttKeys;
 	tagFunc[] ttFuncs;
 	
@@ -129,9 +130,10 @@ class Parser
 	int tokenCounter;
 	bool eof;
 	
-	this(string text, string[] ttKeys, tagFunc[] ttFuncs)
+	this(string text, string[string] dependencies, string[] ttKeys, tagFunc[] ttFuncs)
 	{
 		this.text = text;
+		this.dependencies = dependencies;
 		this.ttKeys = ttKeys;
 		this.ttFuncs = ttFuncs;
 	}
@@ -284,7 +286,7 @@ string parseTemplate(string text, string[string] fileTable)
 	// Tmp:
 	output.put("//" ~ to!string(ttKeys) ~ "\n");
 	
-	auto parser = new Parser(text, ttKeys, ttFuncs);
+	auto parser = new Parser(text, fileTable, ttKeys, ttFuncs);
 	auto nodes = parser.parse();
 	
 	output.put(nodes.render());

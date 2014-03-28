@@ -1,9 +1,9 @@
 ﻿module brakk.templates.tags;
 
-import std.string : startsWith, strip;
+import std.string : startsWith, strip, split;
 import std.conv : to;
 import std.algorithm : findSplitAfter;
-import brakk.templates.base : Node, Parser, Token, render, ErrorNode;
+import brakk.templates.base : Node, Parser, Token, render, ErrorNode, parseTemplate;
 import brakk.templates.helpers : illegalParens;
 
 class CommentNode : Node
@@ -68,3 +68,15 @@ Node foreachTag(Parser parser, Token token)
 
 	return node;
 }
+
+Node includeTag(Parser parser, Token token)
+{
+	Node node = new Node();
+	
+	string data = token.value.split(" ")[1][1..$ - 1];
+	node.writeCode("// Begin include");
+	node.writeCode(parseTemplate(parser.dependencies[data], parser.dependencies));
+	node.writeCode("// End include");
+	return node;
+}
+
