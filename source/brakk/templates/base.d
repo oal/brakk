@@ -27,8 +27,11 @@ void renderTemplate(string templateFile, ALIASES...)(HTTPServerRequest req, HTTP
 	Appender!string buf;
 	
 	pragma(msg, "Compiling template file " ~ templateFile);
-	enum emissionCode = parseTemplate(import(templateFile)); //, genFileTable!templateFile);
+	enum emissionCode = parseTemplate(import(templateFile), genFileTable!templateFile);
 	writeln(emissionCode);
+
+	enum aaa = genFileTable!templateFile;
+	writeln(aaa);
 	/*
 	static struct tmplRoot
 	{
@@ -256,7 +259,7 @@ class Parser
 
 alias Node function(Parser, Token) tagFunc;
 
-string parseTemplate(string text)
+string parseTemplate(string text, string[string] fileTable)
 {
 	Appender!string output;
 	
@@ -287,4 +290,65 @@ string parseTemplate(string text)
 	output.put(nodes.render());
 	
 	return output.data;
+}
+
+private:
+
+@property string[string] genFileTable(string baseFileName)()
+{
+	enum baseFileContents = import(baseFileName);
+	static @property void staticEach(alias vals, alias action, params...)()
+	{
+		static if (vals.length == 0) { } // Do nothing
+		else static if (vals.length == 1)
+		{
+			action!(vals[0], params)();
+		}
+		else
+		{
+			action!(vals[0], params)();
+			staticEach!(vals[1..$], action, params);
+		}
+	}
+
+	// This works, but it isn't great
+	static string[] extractDependencies(string fileContents)
+	{
+		string[] deps;
+
+		int i;
+		int start;
+		while(i < fileContents.length-1)
+		{
+			if(!start && fileContents[i] == '{' && fileContents[i + 1] == '%')
+				start = i + 2;
+			else if(start && fileContents[i] == '%' && fileContents[i + 1] == '}')
+			{
+				auto block = fileContents[start..i - 1].strip().split(" ");
+				switch(block[0])
+				{
+					case "extends", "include":
+						deps ~= block[1].strip()[1..$-1];
+						break;
+					default:
+						break;
+				}
+				start = 0;
+			}
+			i++;
+		}
+
+		return deps;
+	}
+
+	enum directDependencies = extractDependencies(baseFileContents);
+	string[string] ret;
+	static void addDependencies(string dep, alias ret)()
+	{
+		ret[dep] = import(dep);
+		foreach (k, v; genFileTable!(dep))
+			ret[k] = v;
+	}
+	staticEach!(directDependencies, addDependencies, ret);
+	return ret;
 }
