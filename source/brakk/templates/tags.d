@@ -3,7 +3,7 @@
 import std.string : startsWith, strip, split;
 import std.conv : to;
 import std.algorithm : findSplitAfter;
-import brakk.templates.base : Node, Parser, Token, render, ErrorNode, parseTemplate;
+import brakk.templates.base : Node, Template, Token, render, ErrorNode, parseTemplate, BlockNode;
 import brakk.templates.helpers : illegalParens;
 
 class CommentNode : Node
@@ -14,36 +14,36 @@ class CommentNode : Node
 	}
 }
 
-Node commentTag(Parser parser, Token token)
+Node commentTag(Template tmpl, Token token)
 {
-	parser.skipPast("endcomment");
+	tmpl.skipPast("endcomment");
 	return new CommentNode();
 }
 
-Node ifTag(Parser parser, Token token)
+Node ifTag(Template tmpl, Token token)
 {
 	Node node = new Node();
 
 	node.writeCode("if(mixin(q{" ~ token.value[3..$] ~ "})){");
 	
-	Node[] childNodes = parser.parse(["elif", "else", "endif"]);
+	Node[] childNodes = tmpl.parse(["elif", "else", "endif"]);
 	node.writeCode(childNodes.render());
-	token = parser.nextToken();
-	
+	token = tmpl.nextToken();
+
 	while(token.value.startsWith("elif"))
 	{		
-		childNodes = parser.parse(["elif", "else", "endif"]);
+		childNodes = tmpl.parse(["elif", "else", "endif"]);
 		node.writeCode("} else if(mixin(q{" ~ token.value[5..$] ~ "})){");
 		node.writeCode(childNodes.render());
-		token = parser.nextToken();
+		token = tmpl.nextToken();
 	}
 	
 	if(token.value == "else")
 	{
-		childNodes = parser.parse(["endif"]);
+		childNodes = tmpl.parse(["endif"]);
 		node.writeCode("} else {");
 		node.writeCode(childNodes.render());
-		token = parser.nextToken();
+		token = tmpl.nextToken();
 	}
 	
 	if(token.value == "endif") node.writeCode("}");
@@ -51,7 +51,7 @@ Node ifTag(Parser parser, Token token)
 	return node;
 }
 
-Node foreachTag(Parser parser, Token token)
+Node foreachTag(Template tmpl, Token token)
 {
 	Node node = new Node();
 
@@ -59,24 +59,69 @@ Node foreachTag(Parser parser, Token token)
 	if(illegalParens(data)) return new ErrorNode("Illegal use of foreach");
 
 	node.writeCode("foreach(" ~ data ~ "){");
-	Node[] childNodes = parser.parse(["endforeach"]);
+	Node[] childNodes = tmpl.parse(["endforeach"]);
 
 	node.writeCode(childNodes.render());
 
-	token = parser.nextToken();
+	token = tmpl.nextToken();
 	if(token.value == "endforeach") node.writeCode("}");
 
 	return node;
 }
 
-Node includeTag(Parser parser, Token token)
+/*Node includeTag(Template tmpl, Token token)
 {
 	Node node = new Node();
 	
 	string data = token.value.split(" ")[1][1..$ - 1];
 	node.writeCode("// Begin include");
-	node.writeCode(parseTemplate(parser.dependencies[data], parser.dependencies));
+	node.writeCode(parseTemplate(tmpl.dependencies[data], tmpl.dependencies));
 	node.writeCode("// End include");
+	return node;
+}*/
+
+Node blockTag(Template tmpl, Token token)
+{
+	auto node = new BlockNode();
+	auto blockName = token.value.split(" ")[1];
+	
+	if(tmpl.isRoot) 
+	{
+		BlockNode block = tmpl.root.blocks[blockName];
+		node.writeCode(block.render());
+	}
+	else
+	{
+		tmpl.parse(["endblock"]);
+		//node.writeCode(nodes.render());
+		tmpl.root.blocks[blockName] = node;
+	}
+	return node;
+}
+
+Node extendsTag(Template tmpl, Token token)
+{
+	Node node = new Node();
+
+	if(tmpl.tokens.length != 1) return node;
+	
+	string filename = token.value.split(" ")[1][1..$ - 1];
+	auto subTemplate = tmpl.subTemplate(filename);
+	subTemplate.parse();
+	/*
+	while(true)
+	{
+		auto nodes = subTemplate.parse(["block"]);
+		node.writeCode(nodes.render());
+		auto tv = subTemplate.nextToken().value;
+		if(!tv) break;
+		auto block = tv.split(" ")[1].strip();
+		auto blockNode = new BlockNode();
+
+		nodes = subTemplate.parse(["endblock"]);
+		blockNode.writeCode(nodes.render());
+		tmpl.blocks[block] = blockNode;
+	}*/
 	return node;
 }
 

@@ -28,10 +28,10 @@ void renderTemplate(string templateFile, ALIASES...)(HTTPServerRequest req, HTTP
 	
 	pragma(msg, "Compiling template file " ~ templateFile);
 	enum emissionCode = parseTemplate(import(templateFile), genFileTable!templateFile);
-	writeln(emissionCode);
+	//writeln(emissionCode);
 
 	enum aaa = genFileTable!templateFile;
-	writeln(aaa);
+	//writeln(aaa);
 	/*
 	static struct tmplRoot
 	{
@@ -41,7 +41,7 @@ void renderTemplate(string templateFile, ALIASES...)(HTTPServerRequest req, HTTP
 	}
 	tmplRoot.tmplMain(buf);*/
 	
-	mixin(emissionCode);
+	//mixin(emissionCode);
 
 	res.writeBody(buf.data, "text/html; charset=UTF-8");
 }
@@ -107,6 +107,11 @@ class ErrorNode : Node
 	}
 }
 
+class BlockNode : Node
+{
+
+}
+
 string render(Node[] nodes)
 {
 	Appender!string output;
@@ -114,9 +119,14 @@ string render(Node[] nodes)
 	return output.data;
 }
 
-class Parser
+class Template
 {
+	bool isRoot;
+	Template root;
+
 	string[string] dependencies;
+	BlockNode[string] blocks;
+	Node[] nodes;
 	string[] ttKeys;
 	tagFunc[] ttFuncs;
 	
@@ -130,12 +140,23 @@ class Parser
 	int tokenCounter;
 	bool eof;
 	
-	this(string text, string[string] dependencies, string[] ttKeys, tagFunc[] ttFuncs)
+	this(string text, string[string] dependencies, string[] ttKeys, tagFunc[] ttFuncs, bool isRoot=true)
 	{
 		this.text = text;
 		this.dependencies = dependencies;
 		this.ttKeys = ttKeys;
 		this.ttFuncs = ttFuncs;
+		this.isRoot = isRoot;
+		if(isRoot) this.root = this;
+	}
+
+	Template subTemplate(string filename)
+	{
+		auto tmpl = new Template(dependencies[filename], dependencies, ttKeys, ttFuncs, false);
+		tmpl.blocks = this.blocks;
+		tmpl.root = this;
+
+		return tmpl;
 	}
 	
 	Token nextToken()
@@ -198,7 +219,7 @@ class Parser
 			lexerCounter++;
 		}
 
-		token.value = text[start..lexerCounter+1];
+		//token.value = text[0..lexerCounter+1];
 		eof = true;
 	Return:
 		return token;
@@ -257,38 +278,48 @@ class Parser
 		}
 		// Error
 	}
+
+	// Nodes
+	string render()
+	{
+		Appender!string output;
+		foreach(node; nodes) output.put(node.render());
+		return output.data;
+	}
 }
 
-alias Node function(Parser, Token) tagFunc;
+alias Node function(Template, Token) tagFunc;
+
+string tagsAndFilters()
+{
+	Appender!string result;
+
+	// Use two arrays instead of an associative array to get around CTFE limitation.
+	result.put(`
+	string[] ttKeys;
+	tagFunc[] ttFuncs;
+	`);
+
+	foreach(mem; __traits(derivedMembers, ttags))
+	{
+		if(mem[$-3..$] == "Tag")
+		{
+			result.put("ttKeys ~= \""~mem[0..$-3]~"\";\n");
+			result.put("ttFuncs ~= &ttags."~mem~";\n");
+		}
+	}
+	return result.data;
+}
 
 string parseTemplate(string text, string[string] fileTable)
 {
+	mixin(tagsAndFilters());
+	auto tmpl = new Template(text, fileTable, ttKeys, ttFuncs);
+	auto nodes = tmpl.parse();
+
 	Appender!string output;
-	
-	// Use two arrays instead of an associative array to get around CTFE limitation.
-	string[] ttKeys;
-	tagFunc[] ttFuncs;
-	string genTagsMap()
-	{
-		string b;
-		foreach(mem; __traits(derivedMembers, ttags))
-		{
-			if(mem[$-3..$] == "Tag")
-			{
-				b ~= "ttKeys ~= \""~mem[0..$-3]~"\";\n";
-				b ~= "ttFuncs ~= &ttags."~mem~";\n";
-			}
-		}
-		return b;
-	}
-	mixin(genTagsMap());
-	
-	// Tmp:
-	output.put("//" ~ to!string(ttKeys) ~ "\n");
-	
-	auto parser = new Parser(text, fileTable, ttKeys, ttFuncs);
-	auto nodes = parser.parse();
-	
+	//output.put("//" ~ to!string(ttKeys) ~ "\n");
+	output.put("//" ~ to!string(tmpl.blocks.length) ~ "\n");
 	output.put(nodes.render());
 	
 	return output.data;
